@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol, TypeAlias
 
 import etils.epath as epath
 import flax.nnx as nnx
+from numpy import true_divide
 from typing_extensions import override
 import tyro
 
@@ -235,6 +236,9 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     # the space used by the pi internal runtime which was used to train the base model. People who
     # use standard Aloha data should set this to true.
     adapt_to_pi: bool = True
+    # "both" for standard 14-dim Aloha data, or "left"/"right" for a 7-dim single-arm dataset (e.g.
+    # converted with convert_aloha2_vtla_data_to_lerobot.py --arm right).
+    arm: aloha_policy.Arm = "both"
 
     # Repack transforms.
     repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(
@@ -256,11 +260,14 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         data_transforms = _transforms.Group(
-            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi)],
-            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
+            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi, arm=self.arm)],
+            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi, arm=self.arm)],
         )
         if self.use_delta_joint_actions:
-            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            if self.arm == "both":
+                delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            else:
+                delta_action_mask = _transforms.make_bool_mask(6, -1)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -489,7 +496,8 @@ class TrainConfig:
     # Base directory for config assets (e.g., norm stats).
     assets_base_dir: str = "./assets"
     # Base directory for checkpoints.
-    checkpoint_base_dir: str = "./checkpoints"
+    # checkpoint_base_dir: str = "./checkpoints"
+    checkpoint_base_dir: str = "../openpi_checkpoints"
 
     # Random seed that will be used by random generators during training.
     seed: int = 42
@@ -560,6 +568,16 @@ _CONFIGS = [
         ),
         policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
     ),
+
+    TrainConfig(
+        name="pi0_aloha_test",
+        model=pi0_config.Pi0Config(),
+        data=LeRobotAlohaDataConfig(
+            assets=AssetsConfig(asset_id="trossen"),
+        ),
+        policy_metadata={"reset_pose": [0, -1.5, 1.5, 0, 0, 0]},
+    ),
+
     TrainConfig(
         name="pi05_aloha",
         model=pi0_config.Pi0Config(pi05=True),
@@ -786,6 +804,462 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         num_train_steps=20_000,
     ),
+
+    TrainConfig(
+        name="pi0_biplay",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/home/robot/Dataset_and_Checkpoint/dataset/biplay_lerobot",
+            base_config=DataConfig(prompt_from_task=True),
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),  # don't need to load assets
+            default_prompt="push the ball",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=20,
+        batch_size=2,
+        num_workers=0,
+        # Freeze filter for LoRA fine-tuning - freezes base model weights, only trains LoRA adapters
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+
+    TrainConfig(
+        name="pi0_alarm_lora_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/start_timer_lerobot",
+            base_config=DataConfig(prompt_from_task=True),
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),  # don't need to load assets
+            default_prompt="grasp the alarm",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        # batch_size=32,
+        # num_workers=0,
+        # Freeze filter for LoRA fine-tuning - freezes base model weights, only trains LoRA adapters
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+
+    TrainConfig(
+        name="pi0_multiobject_lora_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/multiobject_lerobot",
+            base_config=DataConfig(prompt_from_task=True),
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),  # don't need to load assets
+            default_prompt="test how long it taks to insert the battery and open the cup",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        # batch_size=32,
+        # num_workers=0,
+        # Freeze filter for LoRA fine-tuning - freezes base model weights, only trains LoRA adapters
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+
+    TrainConfig(
+        name="pi0_weighing_lora_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/weighing_lerobot",
+            base_config=DataConfig(prompt_from_task=True),
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),  # don't need to load assets
+            default_prompt="i want to know the total weight of the tape and cube, and recover them after use",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        # batch_size=32,
+        # num_workers=0,
+        # Freeze filter for LoRA fine-tuning - freezes base model weights, only trains LoRA adapters
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+    TrainConfig(
+        name="pi05_weighing_lora_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/weighing_lerobot",
+            base_config=DataConfig(prompt_from_task=True),
+            default_prompt="i want to know the total weight of the tape and cube, and recover them after use",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+    TrainConfig(
+        name="pi05_velcro_lora_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/velcro_taping_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="fasten the velcro",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "gel": "observation.images.gel",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+
+    TrainConfig(
+        name="pi05_wipe_line",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Programs_server/act_dataset_checkpoint/dataset/wipe_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="wipe the line",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+    
+    TrainConfig(
+        name="pi05_board_insertion",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/board_insertion_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="board insertion",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
+    TrainConfig(
+        name="pi05_board_insertion_right_full",
+        # Right arm only, no tactile images. Full fine-tune like pi05_board_insertion_full (no LoRA,
+        # nothing frozen, default EMA). Build the dataset with:
+        #   uv run examples/aloha_real/convert_aloha2_vtla_data_to_lerobot.py \
+        #     --raw-dir /mnt/ssd2/guningquan/Dataset/board_insertion \
+        #     --repo-id /mnt/ssd2/guningquan/Dataset/board_insertion_right_lerobot \
+        #     --task "board insertion" --arm right --no-include-tactile
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/board_insertion_right_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="board insertion",
+            arm="right",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+    ),
+
+    TrainConfig(
+        name="pi05_board_insertion_full",
+        # Full fine-tune: no LoRA variants, no freeze_filter (defaults to nnx.Nothing, i.e.
+        # nothing frozen), ema_decay left at the TrainConfig default. Needs noticeably more
+        # memory/compute than the LoRA version above.
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/board_insertion_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="board insertion",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+    ),
+
+# server configs
+        TrainConfig(
+        name="pi0_biplay_server",
+        # Use LoRA variants to reduce memory usage
+        model=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd1/guningquan/Programs_server/act_dataset_checkpoint/dataset/biplay_lerobot",
+            # assets=AssetsConfig(
+            #     assets_dir="gs://openpi-assets/checkpoints/pi0_base/assets",
+            #     asset_id="trossen",
+            # ),
+            default_prompt="uncap the pen",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_low": "observation.images.cam_low",  
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=30_000,
+        batch_size=4,
+        # num_workers=0,
+        # Freeze filter for LoRA fine-tuning - freezes base model weights, only trains LoRA adapters
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # Turn off EMA for LoRA fine-tuning (reduces memory usage)
+        ema_decay=None,
+    ),
+
     TrainConfig(
         name="pi05_aloha_pen_uncap",
         model=pi0_config.Pi0Config(pi05=True),

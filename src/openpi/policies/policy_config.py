@@ -50,6 +50,7 @@ def create_trained_policy(
     is_pytorch = os.path.exists(weight_path)
 
     logging.info("Loading model...")
+
     if is_pytorch:
         model = train_config.model.load_pytorch(train_config, weight_path)
         model.paligemma_with_expert.to_bfloat16_for_selected_params("bfloat16")

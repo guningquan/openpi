@@ -26,7 +26,8 @@ import openpi.training.optimizer as _optimizer
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
-
+import pathlib
+from PIL import Image
 
 def init_logging():
     """Custom logging format for better readability."""
@@ -191,6 +192,48 @@ def train_step(
     return new_state, info
 
 
+# 在 train_step 函数之前添加（大约在第135行之前）
+def save_training_images(observation: _model.Observation, step: int, save_dir: pathlib.Path, num_samples: int = 5):
+    """Save training images to disk.
+    
+    Args:
+        observation: The observation containing images
+        step: Current training step
+        save_dir: Directory to save images
+        num_samples: Number of samples from batch to save
+    """
+    # Convert JAX arrays to numpy
+    images_dict = {k: np.array(v) for k, v in observation.images.items()}
+    
+    # Get batch size
+    batch_size = next(iter(images_dict.values())).shape[0]
+    num_samples = min(num_samples, batch_size)
+    
+    for i in range(num_samples):
+        # Create directory for this sample
+        sample_dir = save_dir / f"step_{step:06d}" / f"sample_{i}"
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save each camera view
+        for img_name, img_array in images_dict.items():
+            # Get single image from batch: [H, W, C]
+            single_img = img_array[i]
+            
+            # Convert from [-1, 1] float32 to [0, 255] uint8
+            if np.issubdtype(single_img.dtype, np.floating):
+                # Image is in [-1, 1] range, convert to [0, 1] then [0, 255]
+                single_img = (single_img + 1.0) / 2.0  # [-1, 1] -> [0, 1]
+                single_img = np.clip(single_img, 0.0, 1.0)
+                single_img = (single_img * 255.0).astype(np.uint8)
+            else:
+                single_img = single_img.astype(np.uint8)
+            
+            # single_img = single_img[..., ::-1]  # BGR to RGB
+            # Save as PNG
+            img_path = sample_dir / f"{img_name}.png"
+            Image.fromarray(single_img).save(img_path)
+        
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -267,6 +310,16 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
+
+            # # Save training images periodically @gnq
+            # image_save_dir = config.checkpoint_dir / "training_images"
+            # image_save_dir.mkdir(parents=True, exist_ok=True)
+            # logging.info(f"Training images will be saved to: {image_save_dir}")
+            # observation, _ = batch
+            # observation_cpu = jax.tree.map(lambda x: np.array(jax.device_get(x)), observation)
+            # save_training_images(observation_cpu, step, image_save_dir, num_samples=3)
+            # exit()
+
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:

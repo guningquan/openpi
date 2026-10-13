@@ -40,6 +40,7 @@ IMAGE_KEYS = (
     "base_0_rgb",
     "left_wrist_0_rgb",
     "right_wrist_0_rgb",
+    # "gel_0_rgb",
 )
 
 

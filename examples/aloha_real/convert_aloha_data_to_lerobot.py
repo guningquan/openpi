@@ -10,14 +10,14 @@ import shutil
 from typing import Literal
 
 import h5py
-from lerobot.common.datasets.lerobot_dataset import LEROBOT_HOME
+from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME as LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.datasets.push_dataset_to_hub._download_raw import download_raw
+# from lerobot.common.datasets.push_dataset_to_hub._download_raw import download_raw
 import numpy as np
 import torch
 import tqdm
 import tyro
-
+import matplotlib.pyplot as plt
 
 @dataclasses.dataclass(frozen=True)
 class DatasetConfig:
@@ -214,14 +214,27 @@ def populate_dataset(
             for camera, img_array in imgs_per_cam.items():
                 frame[f"observation.images.{camera}"] = img_array[i]
 
+                # print(f"camera: {camera}, img_array[i].shape: {img_array[i].shape}")
+                # plt.figure(figsize=(10, 6))
+                # plt.imshow(frame[f"observation.images.{camera}"])
+                # plt.axis('off')
+                # plt.title(camera)
+                # plt.show(block=False)
+                # plt.waitforbuttonpress()  # Wait for any key or mouse click
+                # plt.close()
+
             if velocity is not None:
                 frame["observation.velocity"] = velocity[i]
             if effort is not None:
                 frame["observation.effort"] = effort[i]
+            
+            frame['task'] = task
 
             dataset.add_frame(frame)
 
-        dataset.save_episode(task=task)
+        # dataset.save_episode(task=task)
+        dataset.save_episode()  # gnq
+        
 
     return dataset
 
@@ -262,10 +275,10 @@ def port_aloha(
         task=task,
         episodes=episodes,
     )
-    dataset.consolidate()
+    # dataset.consolidate()
 
-    if push_to_hub:
-        dataset.push_to_hub()
+    # if push_to_hub:
+    #     dataset.push_to_hub()
 
 
 if __name__ == "__main__":

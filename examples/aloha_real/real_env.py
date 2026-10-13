@@ -96,11 +96,13 @@ class RealEnv:
         return self.image_recorder.get_images()
 
     def set_gripper_pose(self, left_gripper_desired_pos_normalized, right_gripper_desired_pos_normalized):
-        left_gripper_desired_joint = constants.PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(left_gripper_desired_pos_normalized)
+        left_gripper_desired_joint = constants.PUPPET_LEFT_GRIPPER_JOINT_UNNORMALIZE_FN(
+            left_gripper_desired_pos_normalized
+        )
         self.gripper_command.cmd = left_gripper_desired_joint
         self.puppet_bot_left.gripper.core.pub_single.publish(self.gripper_command)
 
-        right_gripper_desired_joint = constants.PUPPET_GRIPPER_JOINT_UNNORMALIZE_FN(
+        right_gripper_desired_joint = constants.PUPPET_RIGHT_GRIPPER_JOINT_UNNORMALIZE_FN(
             right_gripper_desired_pos_normalized
         )
         self.gripper_command.cmd = right_gripper_desired_joint
@@ -112,17 +114,19 @@ class RealEnv:
         )
 
     def _reset_gripper(self):
-        """Set to position mode and do position resets: first close then open. Then change back to PWM mode
+        """Set to position mode and do position resets: first open then close. Then change back to PWM mode.
 
-        NOTE: This diverges from the original Aloha code which first opens then closes the gripper. Pi internal aloha data
-        was collected with the gripper starting in the open position. Leaving the grippers fully closed was also found to
-        increase the frequency of motor faults.
+        Matches the aloha_scripts data-collection reset so deployment starts from the same gripper state.
         """
         robot_utils.move_grippers(
-            [self.puppet_bot_left, self.puppet_bot_right], [constants.PUPPET_GRIPPER_JOINT_CLOSE] * 2, move_time=1
+            [self.puppet_bot_left, self.puppet_bot_right],
+            [constants.PUPPET_LEFT_GRIPPER_JOINT_OPEN, constants.PUPPET_RIGHT_GRIPPER_JOINT_OPEN],
+            move_time=0.5,
         )
         robot_utils.move_grippers(
-            [self.puppet_bot_left, self.puppet_bot_right], [constants.PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5
+            [self.puppet_bot_left, self.puppet_bot_right],
+            [constants.PUPPET_LEFT_GRIPPER_JOINT_CLOSE, constants.PUPPET_RIGHT_GRIPPER_JOINT_CLOSE],
+            move_time=1,
         )
 
     def get_observation(self):
@@ -166,8 +170,8 @@ def get_action(master_bot_left, master_bot_right):
     action[:6] = master_bot_left.dxl.joint_states.position[:6]
     action[7 : 7 + 6] = master_bot_right.dxl.joint_states.position[:6]
     # Gripper actions
-    action[6] = constants.MASTER_GRIPPER_JOINT_NORMALIZE_FN(master_bot_left.dxl.joint_states.position[6])
-    action[7 + 6] = constants.MASTER_GRIPPER_JOINT_NORMALIZE_FN(master_bot_right.dxl.joint_states.position[6])
+    action[6] = constants.MASTER_LEFT_GRIPPER_JOINT_NORMALIZE_FN(master_bot_left.dxl.joint_states.position[6])
+    action[7 + 6] = constants.MASTER_RIGHT_GRIPPER_JOINT_NORMALIZE_FN(master_bot_right.dxl.joint_states.position[6])
 
     return action
 

@@ -314,6 +314,7 @@ class PromptFromLeRobotTask(DataTransformFn):
     tasks: dict[int, str]
 
     def __call__(self, data: DataDict) -> DataDict:
+
         if "task_index" not in data:
             raise ValueError('Cannot extract prompt without "task_index"')
 
@@ -321,6 +322,8 @@ class PromptFromLeRobotTask(DataTransformFn):
         if (prompt := self.tasks.get(task_index)) is None:
             raise ValueError(f"{task_index=} not found in task mapping: {self.tasks}")
 
+        # print(f"Prompt: {prompt}") # @gnq
+        # print(f"Task index: {task_index}") # @gnq
         return {**data, "prompt": prompt}
 
 

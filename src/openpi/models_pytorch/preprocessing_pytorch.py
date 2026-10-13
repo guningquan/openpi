@@ -12,7 +12,8 @@ IMAGE_KEYS = (
     "base_0_rgb",
     "left_wrist_0_rgb",
     "right_wrist_0_rgb",
-)
+    # "gel_0_rgb",
+)  # @gnq
 
 IMAGE_RESOLUTION = (224, 224)
 
@@ -146,6 +147,8 @@ def preprocess_observation_pytorch(
             image = image.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
 
         out_images[key] = image
+
+        # print(f"Image {key} shape: {image.shape}") # @gnq
 
     # obtain mask
     out_masks = {}

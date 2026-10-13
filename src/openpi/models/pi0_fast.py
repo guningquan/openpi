@@ -108,11 +108,13 @@ class Pi0FASTConfig(_model.BaseModelConfig):
                     "base_0_rgb": image_spec,
                     "base_1_rgb": image_spec,
                     "wrist_0_rgb": image_spec,
+                    # "gel_0_rgb": image_spec,  # 添加这一行
                 },
                 image_masks={
                     "base_0_rgb": image_mask_spec,
                     "base_1_rgb": image_mask_spec,
                     "wrist_0_rgb": image_mask_spec,
+                    # "gel_0_rgb": image_mask_spec,  # 添加这一行
                 },
                 state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),

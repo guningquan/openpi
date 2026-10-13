@@ -31,8 +31,8 @@ class Runtime:
 
     def run(self) -> None:
         """Runs the runtime loop continuously until stop() is called or the environment is done."""
-        for _ in range(self._num_episodes):
-            self._run_episode()
+        for episode_idx in range(self._num_episodes):
+            self._run_episode(episode_idx)
 
         # Final reset, this is important for real environments to move the robot to its home position.
         self._environment.reset()
@@ -47,7 +47,7 @@ class Runtime:
         """Marks the end of an episode."""
         self._in_episode = False
 
-    def _run_episode(self) -> None:
+    def _run_episode(self, episode_idx: int = 0) -> None:
         """Runs a single episode."""
         logging.info("Starting episode...")
         self._environment.reset()
@@ -58,9 +58,18 @@ class Runtime:
         self._in_episode = True
         self._episode_steps = 0
         step_time = 1 / self._max_hz if self._max_hz > 0 else 0
+
+        # Wait for the operator to reset the physical scene before starting the episode. @gnq
+        # If the environment implements its own start-gating (e.g. right-arrow/ESC keyboard
+        # control), defer to it; otherwise fall back to the plain Enter-key prompt.
+        if hasattr(self._environment, "wait_for_start"):
+            self._environment.wait_for_start(episode_idx, self._num_episodes)
+        else:
+            input(f"Episode {episode_idx + 1}/{self._num_episodes}: reset objects, then press Enter to start...")
         last_step_time = time.time()
 
         while self._in_episode:
+            # input(f"Step {self._episode_steps} completed. Press Enter to continue...") # gnq
             self._step()
             self._episode_steps += 1
 
@@ -86,7 +95,11 @@ class Runtime:
         for subscriber in self._subscribers:
             subscriber.on_step(observation, action)
 
+
         if self._environment.is_episode_complete() or (
             self._max_episode_steps > 0 and self._episode_steps >= self._max_episode_steps
         ):
+            print(f"Episode {self._episode_steps} completed.") # @gnq
             self.mark_episode_complete()
+            
+
