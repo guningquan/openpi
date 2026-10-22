@@ -1215,6 +1215,116 @@ _CONFIGS = [
         num_train_steps=20_000,
     ),
 
+    TrainConfig(
+        name="pi05_packaging_full",
+        # Full fine-tune for the packaging task, same setup as pi05_board_insertion_full. The dataset is
+        # 50 Hz hdf5 data converted with:
+        #   uv run examples/aloha_real/convert_aloha_data_to_lerobot_no_bgr2rgb.py \
+        #     --raw-dir /mnt/ssd2/guningquan/Dataset/packaging \
+        #     --repo-id /mnt/ssd2/guningquan/Dataset/packaging_lerobot \
+        #     --task "packaging the items"
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/packaging_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="packaging the items",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+    ),
+    TrainConfig(
+        name="pi05_packaging_plus_full",
+        # packaging (50 full demos) + packaging_move_box (box-grasp demos), merged via symlinks in
+        # /mnt/ssd2/guningquan/Dataset/packaging_plus. 50 Hz hdf5 data.
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/packaging_plus_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="packaging the items",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+    ),
+
+    TrainConfig(
+        name="pi05_packaging_simple_full",
+        # Full fine-tune on packaging_simple (50 demos, 50 Hz hdf5, 3 cameras: no cam_low). Trained on the cloud
+        # (autodl) with repo_id=/root/autodl-tmp/packaging_simple_lerobot and
+        # pytorch_weight_path=/root/autodl-tmp/openpi_checkpoints/pi05_base_pytorch; the paths below are this
+        # server's equivalents. Converted with:
+        #   uv run examples/aloha_real/convert_aloha_data_to_lerobot_no_bgr2rgb.py \
+        #     --raw-dir /mnt/ssd2/guningquan/Dataset/packaging_simple \
+        #     --repo-id /mnt/ssd2/guningquan/Dataset/packaging_simple_lerobot \
+        #     --task "packaging the items"
+        # Serving loads norm stats from <repo_id>/norm_stats.json (repo_id is absolute), so that file must exist.
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/packaging_simple_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="packaging the items",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # JAX pi05_base converted with examples/convert_jax_model_to_pytorch.py, used by scripts/train_pytorch.py
+        pytorch_weight_path="/mnt/ssd2/guningquan/Programs_server/openpi_checkpoints/pi05_base_pytorch",
+        num_train_steps=20_000,
+        save_interval=2_000,
+        num_workers=12,
+        # Same batch size / steps / lr schedule as the earlier packaging run. Measured on a single A800 80GB:
+        # bs=32 ~43.6 GB, 4.6 s/step; bs=64 ~57 GB, 9.3 s/step; bs=96 ~72 GB, 14.5 s/step.
+        batch_size=32,
+    ),
+
 # server configs
         TrainConfig(
         name="pi0_biplay_server",

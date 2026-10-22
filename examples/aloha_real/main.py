@@ -9,7 +9,7 @@ from openpi_client.runtime.agents import policy_agent as _policy_agent
 import tyro
 
 from examples.aloha_real import env as _env
-from examples.aloha_real.keyboard_control import UserAborted
+from examples.aloha_real.keyboard_control import ResetRequested, UserAborted
 
 from examples.aloha_real.sleep_modify import shut_down_puppet_robots
 
@@ -24,7 +24,7 @@ class Args:
     max_hz: float = 50  # control loop rate
 
     num_episodes: int = 1
-    max_episode_steps: int = 1500 
+    max_episode_steps: int = 3000 
 
     # Must match the policy's training data: "right"/"left" for a single-arm policy (e.g.
     # pi05_board_insertion_right_full), in which case the other arm is held still.
@@ -55,7 +55,14 @@ def main(args: Args) -> None:
     )
 
     try:
-        runtime.run()
+        while True:
+            try:
+                runtime.run()
+                break
+            except ResetRequested:
+                # LEFT arrow mid-episode: run again, which resets to home (and clears the
+                # current action chunk) and then waits for RIGHT to restart.
+                continue
     except UserAborted:
         logging.info("Cancelled by user (ESC/q).")
     finally:

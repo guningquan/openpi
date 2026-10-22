@@ -114,19 +114,17 @@ class RealEnv:
         )
 
     def _reset_gripper(self):
-        """Set to position mode and do position resets: first open then close. Then change back to PWM mode.
+        """Open both grippers and leave them open.
 
-        Matches the aloha_scripts data-collection reset so deployment starts from the same gripper state.
+        Matches the act-triple-plus-aloha2 recorders (record_episodes_aloha2.py's opening_ceremony parks the
+        puppets fully open), so every training episode starts with open grippers (gripper state ~0.29). The
+        policy's gripper output follows the gripper state it is given, so starting closed (the old
+        open-then-close reset) made it keep the grippers closed.
         """
         robot_utils.move_grippers(
             [self.puppet_bot_left, self.puppet_bot_right],
             [constants.PUPPET_LEFT_GRIPPER_JOINT_OPEN, constants.PUPPET_RIGHT_GRIPPER_JOINT_OPEN],
             move_time=0.5,
-        )
-        robot_utils.move_grippers(
-            [self.puppet_bot_left, self.puppet_bot_right],
-            [constants.PUPPET_LEFT_GRIPPER_JOINT_CLOSE, constants.PUPPET_RIGHT_GRIPPER_JOINT_CLOSE],
-            move_time=1,
         )
 
     def get_observation(self):

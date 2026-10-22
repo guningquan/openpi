@@ -1,8 +1,8 @@
-"""Right-arrow/ESC terminal keyboard control for the deployment client.
+"""Arrow-key/ESC terminal keyboard control for the deployment client.
 
 Ported from act-triple-plus-aloha2/aloha_scripts/one_side_teleop.py's KeyboardControl, trimmed
-to only the two events this client needs (right arrow to start, ESC/q to cancel). No ROS
-dependency - just termios/tty/select on the controlling terminal.
+to the events this client needs (right arrow to start, left arrow to reset to home, ESC/q to
+cancel). No ROS dependency - just termios/tty/select on the controlling terminal.
 """
 
 import os
@@ -17,10 +17,15 @@ class UserAborted(Exception):
     """Raised when the operator pressed ESC/q to cancel the run."""
 
 
+class ResetRequested(Exception):
+    """Raised when the operator pressed the left arrow mid-episode to reset to home and restart."""
+
+
 class KeyboardControl:
     """Arrow-key / ESC reader on the controlling terminal, polled without blocking.
 
-    cbreak mode, not raw: Ctrl+C keeps working. Right arrow starts, ESC (or q) cancels.
+    cbreak mode, not raw: Ctrl+C keeps working. Right arrow starts, left arrow resets, ESC (or q)
+    cancels.
     When stdin is not a tty there is nothing to read from, so `enabled` is False and the
     caller should skip waiting for a keypress and just proceed.
     """
@@ -45,7 +50,7 @@ class KeyboardControl:
             print(f"Keyboard control unavailable ({exc}).")
 
     def poll(self):
-        """Return the key events seen since the last call: 'right', 'esc' - zero or more,
+        """Return the key events seen since the last call: 'right', 'left', 'esc' - zero or more,
         in the order the corresponding bytes arrived."""
         if not self.enabled:
             return []
@@ -73,6 +78,8 @@ class KeyboardControl:
                 self._buffer = self._buffer[3:]
                 if code == b"C":
                     events.append("right")
+                elif code == b"D":
+                    events.append("left")
                 continue
             if len(self._buffer) == 1 and time.time() - self._buffer_time > self.ESC_HOLDOFF_S:
                 self._buffer = b""

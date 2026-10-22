@@ -8,7 +8,7 @@ from openpi_client.runtime import environment as _environment
 from typing_extensions import override
 
 from examples.aloha_real import real_env as _real_env
-from examples.aloha_real.keyboard_control import KeyboardControl, UserAborted
+from examples.aloha_real.keyboard_control import KeyboardControl, ResetRequested, UserAborted
 
 
 class AlohaRealEnvironment(_environment.Environment):
@@ -41,8 +41,8 @@ class AlohaRealEnvironment(_environment.Environment):
             other = slice(7, 14) if self._arm == "left" else slice(0, 7)
             hold = np.array(self._ts.observation["qpos"][other], dtype=np.float64)
             # qpos holds the gripper *position*, but step() takes a normalized gripper *joint*
-            # command; 0 is the closed joint position that reset() leaves the gripper in.
-            hold[6] = 0.0
+            # command; 1 is the open joint position that reset() leaves the gripper in.
+            hold[6] = 1.0
             self._hold_action = hold
 
     def _abort(self) -> None:
@@ -63,7 +63,10 @@ class AlohaRealEnvironment(_environment.Environment):
         while True:
             for event in self._keyboard.poll():
                 if event == "right":
-                    print(f"Episode {episode_idx + 1}/{num_episodes}: running - press q or ESC at any time to cancel.")
+                    print(
+                        f"Episode {episode_idx + 1}/{num_episodes}: running - press LEFT to reset to home, "
+                        "q or ESC to cancel."
+                    )
                     return
                 if event == "esc":
                     self._abort()
@@ -74,6 +77,10 @@ class AlohaRealEnvironment(_environment.Environment):
         for event in self._keyboard.poll():
             if event == "esc":
                 self._abort()
+            if event == "left":
+                # main.py catches this and reruns the runtime, which homes the arms and waits for RIGHT.
+                print("LEFT detected: stopping and resetting to home...")
+                raise ResetRequested
         return False
 
     def close(self) -> None:
