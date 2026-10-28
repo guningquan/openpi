@@ -1325,6 +1325,81 @@ _CONFIGS = [
         batch_size=32,
     ),
 
+    TrainConfig(
+        name="pi05_packaging_simple_2_full",
+        # Same as pi05_packaging_simple_full, on packaging_simple_2 (50 demos, 50 Hz hdf5, 3 cameras: no cam_low).
+        # Converted from /mnt/ssd2/guningquan/Dataset/packaging_simple_2 with convert_aloha_data_to_lerobot_no_bgr2rgb.py
+        # minus cam_low (absent in this data), task "packaging the items".
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/packaging_simple_2_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="packaging the items",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # JAX pi05_base converted with examples/convert_jax_model_to_pytorch.py, used by scripts/train_pytorch.py
+        pytorch_weight_path="/mnt/ssd2/guningquan/Programs_server/openpi_checkpoints/pi05_base_pytorch",
+        num_train_steps=20_000,
+        save_interval=2_000,
+        num_workers=12,
+        batch_size=32,
+    ),
+
+    TrainConfig(
+        name="pi05_packaging_simple_2_plus_full",
+        # Same as pi05_packaging_simple_2_full, on packaging_simple_2 (50 demos) + packaging_simple_2_plus (30 extra demos
+        # focused on the final cable-press step): 80 demos, 50 Hz hdf5, 3 cameras (no cam_low). Episodes 0-49 are the
+        # converted packaging_simple_2_lerobot episodes (hard-linked), 50-79 are packaging_simple_2_plus episodes 0-29.
+        # Trained on 4 GPUs (global batch_size stays 32).
+        model=pi0_config.Pi0Config(
+            pi05=True,
+        ),
+        data=LeRobotAlohaDataConfig(
+            repo_id="/mnt/ssd2/guningquan/Dataset/packaging_simple_2_plus_lerobot",
+            base_config=DataConfig(prompt_from_task=False),
+            default_prompt="packaging the items",
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                        }
+                    )
+                ]
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # JAX pi05_base converted with examples/convert_jax_model_to_pytorch.py, used by scripts/train_pytorch.py
+        pytorch_weight_path="/mnt/ssd2/guningquan/Programs_server/openpi_checkpoints/pi05_base_pytorch",
+        num_train_steps=20_000,
+        save_interval=2_000,
+        num_workers=12,
+        batch_size=32,
+    ),
+
 # server configs
         TrainConfig(
         name="pi0_biplay_server",

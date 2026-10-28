@@ -9,11 +9,25 @@ Example usage:
 uv run examples/aloha_real/convert_aloha_data_to_lerobot_multi.py \
   --raw-dir /path/to/multiobject \
   --repo-id /path/to/multiobject_lerobot
+
+Cameras listed in CAMERAS but missing from the data are left out of the dataset.
+
+Faster conversion (same options as convert_aloha_data_to_lerobot_no_bgr2rgb.py, which implements them):
+  --num-workers N   converts the episodes in N parallel processes, then merges them into repo-id and checks the
+                    result against the raw hdf5 files (the default 1 converts one episode at a time).
+  --base-repo-id D  reuses the already converted LeRobot dataset D as the first episodes of repo-id (hard-linked,
+                    D is left unchanged); only raw-dir is converted. Tasks of D and raw-dir are merged.
+
+uv run examples/aloha_real/convert_aloha_data_to_lerobot_no_bgr2rgb_multi.py \
+  --raw-dir /path/to/multiobject \
+  --repo-id /path/to/multiobject_lerobot \
+  --num-workers 6
 """
 
 import dataclasses
 from pathlib import Path
 import shutil
+import sys
 from typing import Literal
 
 import h5py
@@ -25,6 +39,16 @@ import torch
 import tqdm
 import tyro
 import matplotlib.pyplot as plt
+
+from convert_aloha_data_to_lerobot_no_bgr2rgb import convert_shard_from_spec
+from convert_aloha_data_to_lerobot_no_bgr2rgb import run_parallel
+
+CAMERAS = [
+    "cam_high",
+    # "cam_low",
+    "cam_left_wrist",
+    "cam_right_wrist",
+]
 
 @dataclasses.dataclass(frozen=True)
 class DatasetConfig:
@@ -46,6 +70,7 @@ def create_empty_dataset(
     has_velocity: bool = False,
     has_effort: bool = False,
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
+    cameras: list[str] | None = None,
 ) -> LeRobotDataset:
     motors = [
         "right_waist",
@@ -63,12 +88,8 @@ def create_empty_dataset(
         "left_wrist_rotate",
         "left_gripper",
     ]
-    cameras = [
-        "cam_high",
-        # "cam_low",
-        "cam_left_wrist",
-        "cam_right_wrist",
-    ]
+    if cameras is None:
+        cameras = CAMERAS
 
     features = {
         "observation.state": {
@@ -215,12 +236,7 @@ def load_raw_episode_data(
 
         imgs_per_cam = load_raw_images_per_camera(
             ep,
-            [
-                "cam_high",
-                # "cam_low",
-                "cam_left_wrist",
-                "cam_right_wrist",
-            ],
+            [cam for cam in CAMERAS if f"/observations/images/{cam}" in ep],
         )
 
     return imgs_per_cam, state, action, velocity, effort
@@ -285,13 +301,21 @@ def port_aloha(
     is_mobile: bool = False,
     mode: Literal["video", "image"] = "image",
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
+    num_workers: int = 1,
+    base_repo_id: str | None = None,
 ):
     """Convert multiple subfolders of Aloha hdf5 data to a single LeRobot dataset.
     
     Each subfolder should contain:
     - One or more episode_*.hdf5 files
     - One .txt file containing the task description
+
+    num_workers > 1: convert in that many parallel processes. base_repo_id: reuse that converted dataset as the
+    first episodes (see the module docstring).
     """
+    if base_repo_id is not None and Path(LEROBOT_HOME / base_repo_id).resolve() == Path(LEROBOT_HOME / repo_id).resolve():
+        raise ValueError("base_repo_id must differ from repo_id (repo_id is deleted and rewritten)")
+
     if (LEROBOT_HOME / repo_id).exists():
         shutil.rmtree(LEROBOT_HOME / repo_id)
 
@@ -327,6 +351,28 @@ def port_aloha(
     if not all_hdf5_files:
         raise ValueError(f"No hdf5 files found in any subfolder of {raw_dir}")
 
+    cameras = [cam for cam in CAMERAS if cam in get_cameras(all_hdf5_files)]
+
+    if num_workers > 1 or base_repo_id is not None:
+        files_tasks = []
+        for _, task, hdf5_files in subfolder_data:
+            selected = hdf5_files if episodes is None else [hdf5_files[i] for i in episodes]
+            files_tasks.extend((f, task) for f in selected)
+        run_parallel(
+            __file__,
+            repo_id,
+            files_tasks,
+            num_workers=num_workers,
+            base_repo_id=base_repo_id,
+            cameras=cameras,
+            has_velocity=has_velocity(all_hdf5_files),
+            has_effort=has_effort(all_hdf5_files),
+            robot_type="mobile_aloha" if is_mobile else "aloha",
+            mode=mode,
+            dataset_config=dataset_config,
+        )
+        return
+
     # Create dataset with properties determined from all hdf5 files
     dataset = create_empty_dataset(
         repo_id,
@@ -335,6 +381,7 @@ def port_aloha(
         has_effort=has_effort(all_hdf5_files),
         has_velocity=has_velocity(all_hdf5_files),
         dataset_config=dataset_config,
+        cameras=cameras,
     )
 
     # Process each subfolder and add to the unified dataset
@@ -354,4 +401,7 @@ def port_aloha(
 
 
 if __name__ == "__main__":
-    tyro.cli(port_aloha)
+    if len(sys.argv) == 3 and sys.argv[1] == "_shard":  # child process started by run_parallel
+        convert_shard_from_spec(sys.argv[2], create_empty_dataset, populate_dataset)
+    else:
+        tyro.cli(port_aloha)
